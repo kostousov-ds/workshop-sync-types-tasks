@@ -42,9 +42,11 @@ public class BankImpl implements Bank {
     public long getAmount(int index) {
 	final Account account = accounts[index];
 	long ret = 0;
-//	account.lock.tryLock(10, TimeUnit.SECONDS)
-	synchronized (account) {
+	account.lock.lock();
+	try {
 	    ret = account.amount;
+	} finally {
+	    account.lock.unlock();
 	}
 	return ret;
     }
@@ -56,9 +58,17 @@ public class BankImpl implements Bank {
     @Override
     public long getTotalAmount() {
 	long sum = 0;
-	for (Account account : accounts) {
-	    synchronized (account) {
+
+	try {
+	    for (int i = 0; i < accounts.length; i++) {
+		accounts[i].lock.lock();
+	    }
+	    for (Account account : accounts) {
 		sum += account.amount;
+	    }
+	} finally {
+	    for (Account account : accounts) {
+		account.lock.unlock();
 	    }
 	}
 	return sum;
@@ -75,12 +85,15 @@ public class BankImpl implements Bank {
 	}
 	long ret = 0;
 	Account account = accounts[index];
-	synchronized (account) {
+	account.lock.lock();
+	try{
 	    if (amount > MAX_AMOUNT || account.amount + amount > MAX_AMOUNT) {
 		throw new IllegalStateException("Overflow");
 	    }
 	    account.amount += amount;
 	    ret = account.amount;
+	}   finally {
+	    account.lock.unlock();
 	}
 	return ret;
     }
@@ -96,12 +109,15 @@ public class BankImpl implements Bank {
 	}
 	Account account = accounts[index];
 	long ret = 0;
-	synchronized (account) {
+	account.lock.lock();
+	try{
 	    if (account.amount - amount < 0) {
 		throw new IllegalStateException("Underflow");
 	    }
 	    account.amount -= amount;
 	    ret = account.amount;
+	}   finally {
+	    account.lock.unlock();
 	}
 	return ret;
     }
@@ -121,11 +137,13 @@ public class BankImpl implements Bank {
 	Account from = accounts[fromIndex];
 	Account to = accounts[toIndex];
 
-	Account first = fromIndex > toIndex ? to : from;
-	Account second = fromIndex >= toIndex ? from : to;
+	Account first = toIndex < fromIndex ? to : from;
+	Account second = fromIndex > toIndex ? from : to;
 
-	synchronized (first){
-	    synchronized (second) {
+	first.lock.lock();
+	try {
+	    second.lock.lock();
+	    try {
 		if (amount > from.amount) {
 		    throw new IllegalStateException("Underflow");
 		} else if (amount > MAX_AMOUNT || to.amount + amount > MAX_AMOUNT) {
@@ -133,7 +151,11 @@ public class BankImpl implements Bank {
 		}
 		from.amount -= amount;
 		to.amount += amount;
+	    } finally {
+		second.lock.unlock();
 	    }
+	} finally {
+	    first.lock.unlock();
 	}
     }
 
