@@ -7,6 +7,7 @@ public class SetImpl implements Set {
     private class Node {
 	Lock lock = new ReentrantLock();
 	volatile Node next;
+	volatile boolean removed = false;
 	int x;
 
 	Node(int x, Node next) {
@@ -79,8 +80,7 @@ public class SetImpl implements Set {
     }
 
     private boolean validate(Window w, int x) {
-	Window ww = findWindow(x);
-	return ww.cur == w.cur && ww.next == w.next && ww.cur.next == ww.next;
+	return !w.cur.removed && !w.next.removed && w.cur.next == w.next;
     }
 
     @Override
@@ -104,6 +104,7 @@ public class SetImpl implements Set {
 	    if (w.next.x != x) {
 		res = false;
 	    } else {
+		w.next.removed = true;
 		w.cur.next = w.next.next;
 		res = true;
 	    }
@@ -115,25 +116,7 @@ public class SetImpl implements Set {
 
     @Override
     public boolean contains(int x) {
-	while (true) {
-	    try {
-		return containsImpl(x);
-	    } catch (Exception ignored) {
-	    }
-	}
-    }
-
-    private boolean containsImpl(int x) throws Exception {
 	Window w = findWindow(x);
-	try {
-	    w.lock();
-	    if (!validate(w, x)) {
-		throw new Exception("retry");
-	    }
-	    boolean res = w.next.x == x;
-	    return res;
-	} finally {
-	    w.unlock();
-	}
+	return w.next.x == x;
     }
 }
