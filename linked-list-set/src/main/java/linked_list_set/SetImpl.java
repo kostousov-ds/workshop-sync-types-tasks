@@ -1,22 +1,31 @@
 package linked_list_set;
 
+import java.util.concurrent.atomic.AtomicMarkableReference;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class SetImpl implements Set {
     private class Node {
 	Lock lock = new ReentrantLock();
-	volatile Node next;
-	volatile boolean removed = false;
+	AtomicMarkableReference<Node> N;
 	int x;
 
 	Node(int x, Node next) {
-	    this.next = next;
+	    // флаг означает удаленность ТЕКУЩЕГО элемента, не следующего!!!
+	    this.N = new AtomicMarkableReference<>(next, false);
 	    this.x = x;
 	}
     }
 
     private class Window {
+	public Window() {
+	}
+
+	public Window(Node cur, Node next) {
+	    this.cur = cur;
+	    this.next = next;
+	}
+
 	Node cur, next;
 
 	void lock() {
@@ -33,67 +42,96 @@ public class SetImpl implements Set {
     private final Node head = new Node(Integer.MIN_VALUE, new Node(Integer.MAX_VALUE, null));
 
     /**
-     * Returns the {@link Window}, where cur.x < x <= next.x
+     * Returns the {@link Window}, where cur.x < x <= N.x
      */
     private Window findWindow(int x) {
-	Window w = new Window();
-	w.cur = head;
-	w.next = w.cur.next;
+	boolean[] removed = new boolean[1];
+	retry:
+	while (true) {
+	    Node cur = head;
+	    Node next = cur.N.get(removed);
+	    Node nextnext;
 
-	while (w.next.x < x) {
-	    w.cur = w.next;
-	    w.next = w.cur.next;
+	    while (next.x < x) {
+		nextnext = next.N.get(removed);
+		if (removed[0]) {
+		    // первый флаг - что cur не удален
+		    if (!cur.N.compareAndSet(next, nextnext, false, false)) {
+			continue retry;
+		    }
+		    next = nextnext;
+		} else {
+		    cur = next;
+		    next = nextnext;
+/*
+		    nextnext = next.N.get(removed);
+		    if (removed[0]) {
+			if (!cur.N.compareAndSet(next, nextnext, false, false)) {
+			    continue retry;
+			}
+			next = nextnext;
+		    }
+*/
+		}
+	    }
+	    nextnext = next.N.get(removed);
+	    if (removed[0]) {
+		if (!cur.N.compareAndSet(next, nextnext, false, false)) {
+		    continue;
+		}
+		next = nextnext;
+	    }
+	    return new Window(cur, next);
 	}
-	return w;
     }
 
     @Override
     public boolean add(int x) {
 	while (true) {
 	    Window w = findWindow(x);
-	    w.lock();
-	    try {
-		if (!validate(w, x)) {
+//	    if (!validate(w, x)) {
+//		continue;
+//	    }
+
+	    boolean res;
+	    if (w.next.x == x) {
+		res = false;
+	    } else {
+		final Node node = new Node(x, w.next);
+		if (!w.cur.N.compareAndSet(w.next, node, false, false)) {
 		    continue;
 		}
-
-		boolean res;
-		if (w.next.x == x) {
-		    res = false;
-		} else {
-		    w.cur.next = new Node(x, w.next);
-		    res = true;
-		}
-		return res;
-	    } finally {
-		w.unlock();
+		res = true;
 	    }
+	    return res;
 	}
     }
 
-    private boolean validate(Window w, int x) {
-	return !w.cur.removed && !w.next.removed && w.cur.next == w.next;
-    }
+//    private boolean validate(Window w, int x) {
+//	return !w.cur.removed && !w.next.removed && w.cur.N == w.next;
+//    }
 
     @Override
     public boolean remove(int x) {
 	while (true) {
 	    Window w = findWindow(x);
 	    boolean res;
-	    try {
-		w.lock();
-		if (!validate(w, x)) {
+	    if (w.next.x != x) {
+		res = false;
+	    } else {
+		boolean[] removed = new boolean[1];
+		final Node nextnext = w.next.N.get(removed);
+		if (removed[0]) {
+		    return false;
+		}
+		// помечаем next как удаленный
+		if (!w.next.N.compareAndSet(nextnext, nextnext, false, true)) {
 		    continue;
 		}
-		if (w.next.x != x) {
-		    res = false;
-		} else {
-		    w.next.removed = true;
-		    w.cur.next = w.next.next;
-		    res = true;
-		}
-	    } finally {
-		w.unlock();
+
+		// одна попытка переставить
+		w.cur.N.compareAndSet(w.next, nextnext, false, false);
+		res = true;
 	    }
 	    return res;
 	}
