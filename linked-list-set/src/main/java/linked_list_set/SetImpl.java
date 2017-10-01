@@ -50,19 +50,13 @@ public class SetImpl implements Set {
     @Override
     public boolean add(int x) {
 	while (true) {
-	    boolean res = false;
+	    Window w = findWindow(x);
+	    w.lock();
 	    try {
-		return addImpl(x);
-	    } catch (Exception ignored) {
-	    }
-	}
-    }
+		if (!validate(w, x)) {
+		    continue;
+		}
 
-    private boolean addImpl(int x) throws Exception {
-	Window w = findWindow(x);
-	w.lock();
-	try {
-	    if (validate(w, x)) {
 		boolean res;
 		if (w.next.x == x) {
 		    res = false;
@@ -71,11 +65,9 @@ public class SetImpl implements Set {
 		    res = true;
 		}
 		return res;
-	    } else {
-		throw new Exception("next try");
+	    } finally {
+		w.unlock();
 	    }
-	} finally {
-	    w.unlock();
 	}
     }
 
@@ -86,32 +78,25 @@ public class SetImpl implements Set {
     @Override
     public boolean remove(int x) {
 	while (true) {
+	    Window w = findWindow(x);
+	    boolean res;
 	    try {
-		return removeImpl(x);
-	    } catch (Exception ignored) {
+		w.lock();
+		if (!validate(w, x)) {
+		    continue;
+		}
+		if (w.next.x != x) {
+		    res = false;
+		} else {
+		    w.next.removed = true;
+		    w.cur.next = w.next.next;
+		    res = true;
+		}
+	    } finally {
+		w.unlock();
 	    }
+	    return res;
 	}
-    }
-
-    private boolean removeImpl(int x) throws Exception {
-	Window w = findWindow(x);
-	boolean res;
-	try {
-	    w.lock();
-	    if (!validate(w, x)) {
-		throw new Exception("retry");
-	    }
-	    if (w.next.x != x) {
-		res = false;
-	    } else {
-		w.next.removed = true;
-		w.cur.next = w.next.next;
-		res = true;
-	    }
-	} finally {
-	    w.unlock();
-	}
-	return res;
     }
 
     @Override
